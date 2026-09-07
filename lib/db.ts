@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Complaint, AppUser, SafeUser } from '@/types/complaint';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR = process.env.VERCEL ? path.join('/tmp', 'data') : path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'complaints.json');
 
 // Initialize Supabase if environment variables exist
@@ -131,27 +131,40 @@ const INITIAL_SAMPLE_COMPLAINTS: Complaint[] = [
   }
 ];
 
+let memoryCache: DatabaseSchema | null = null;
+
 function ensureDataDir(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+  } catch (err) {
+    // In serverless environments, file creation might fail gracefully
+    console.warn('Could not create data dir, using memory fallback:', err);
   }
 }
 
 function readDb(): DatabaseSchema {
-  ensureDataDir();
-  if (!fs.existsSync(DB_FILE)) {
-    const initialData: DatabaseSchema = {
-      complaints: INITIAL_SAMPLE_COMPLAINTS,
-      categories: DEFAULT_CATEGORIES,
-      suppliers: DEFAULT_SUPPLIERS,
-      warehouses: DEFAULT_WAREHOUSES,
-      users: DEFAULT_USERS
-    };
-    fs.writeFileSync(DB_FILE, JSON.stringify(initialData, null, 2), 'utf-8');
-    return initialData;
-  }
+  if (memoryCache) return memoryCache;
+
+  const fallback: DatabaseSchema = {
+    complaints: INITIAL_SAMPLE_COMPLAINTS,
+    categories: DEFAULT_CATEGORIES,
+    suppliers: DEFAULT_SUPPLIERS,
+    warehouses: DEFAULT_WAREHOUSES,
+    users: DEFAULT_USERS
+  };
 
   try {
+    ensureDataDir();
+    if (!fs.existsSync(DB_FILE)) {
+      try {
+        fs.writeFileSync(DB_FILE, JSON.stringify(fallback, null, 2), 'utf-8');
+      } catch {}
+      memoryCache = fallback;
+      return fallback;
+    }
+
     const raw = fs.readFileSync(DB_FILE, 'utf-8');
     const data = JSON.parse(raw) as DatabaseSchema;
     if (!data.complaints) data.complaints = [];
@@ -159,25 +172,24 @@ function readDb(): DatabaseSchema {
     if (!data.suppliers) data.suppliers = DEFAULT_SUPPLIERS;
     if (!data.warehouses) data.warehouses = DEFAULT_WAREHOUSES;
     if (!data.users || data.users.length === 0) data.users = DEFAULT_USERS;
+    memoryCache = data;
     return data;
   } catch {
-    const initialData: DatabaseSchema = {
-      complaints: INITIAL_SAMPLE_COMPLAINTS,
-      categories: DEFAULT_CATEGORIES,
-      suppliers: DEFAULT_SUPPLIERS,
-      warehouses: DEFAULT_WAREHOUSES,
-      users: DEFAULT_USERS
-    };
-    fs.writeFileSync(DB_FILE, JSON.stringify(initialData, null, 2), 'utf-8');
-    return initialData;
+    memoryCache = fallback;
+    return fallback;
   }
 }
 
 function writeDb(data: DatabaseSchema): void {
-  ensureDataDir();
-  const tempFile = `${DB_FILE}.tmp`;
-  fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), 'utf-8');
-  fs.renameSync(tempFile, DB_FILE);
+  memoryCache = data;
+  try {
+    ensureDataDir();
+    const tempFile = `${DB_FILE}.tmp`;
+    fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), 'utf-8');
+    fs.renameSync(tempFile, DB_FILE);
+  } catch (err) {
+    console.warn('Could not persist to file, kept in memoryCache:', err);
+  }
 }
 
 // Convert Supabase row to Complaint object
