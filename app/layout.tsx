@@ -7,6 +7,11 @@ const inter = Inter({ subsets: ['latin'] });
 export const metadata: Metadata = {
   title: 'Food Complaint Management System',
   description: 'Track and manage food quality complaint letters sent from warehouses to suppliers',
+  icons: {
+    icon: '/icon.svg',
+    shortcut: '/icon.svg',
+    apple: '/icon.svg'
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
