@@ -18,6 +18,9 @@ export async function GET() {
       'Date Response Received',
       'Description',
       'Notes',
+      'Logged By',
+      'Resolved By',
+      'Last Updated By',
       'Created At'
     ];
 
@@ -42,6 +45,9 @@ export async function GET() {
         escapeCsv(c.dateResponseReceived || 'N/A'),
         escapeCsv(c.description),
         escapeCsv(c.notes || ''),
+        escapeCsv(c.createdBy || 'Unknown'),
+        escapeCsv(c.resolvedBy || (status === 'RESOLVED' ? 'Unknown' : 'N/A')),
+        escapeCsv(c.updatedBy || ''),
         escapeCsv(c.createdAt)
       ].join(',');
     });

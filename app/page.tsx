@@ -1,27 +1,28 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Complaint, getComputedStatus } from '@/types/complaint';
+import { Complaint, getComputedStatus, SafeUser } from '@/types/complaint';
 import { Header } from '@/components/Header';
 import { StatsSummary } from '@/components/StatsSummary';
 import { ComplaintCard } from '@/components/ComplaintCard';
 import { ComplaintFormModal } from '@/components/ComplaintFormModal';
 import { ComplaintDetailModal } from '@/components/ComplaintDetailModal';
+import { UserManagementModal } from '@/components/UserManagementModal';
 import { LoginModal } from '@/components/LoginModal';
 import { 
   Search, 
   Filter, 
   Plus, 
   RefreshCw, 
-  AlertCircle, 
   CheckCircle2,
-  Calendar,
   X
 } from 'lucide-react';
 import { format } from 'date-fns';
 
 export default function Dashboard() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [currentUser, setCurrentUser] = useState<SafeUser | null>(null);
+
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [suggestions, setSuggestions] = useState<{
     categories: string[];
@@ -38,9 +39,11 @@ export default function Dashboard() {
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'OVERDUE' | 'PENDING' | 'RESOLVED'>('ALL');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [supplierFilter, setSupplierFilter] = useState<string>('ALL');
+  const [userFilter, setUserFilter] = useState<string>('ALL');
 
   // Modals state
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
   const [editingComplaint, setEditingComplaint] = useState<Complaint | null>(null);
   const [viewingComplaint, setViewingComplaint] = useState<Complaint | null>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -50,9 +53,16 @@ export default function Dashboard() {
     try {
       const res = await fetch('/api/auth');
       const data = await res.json();
-      setIsAuthenticated(data.authenticated);
+      if (data.authenticated && data.user) {
+        setIsAuthenticated(true);
+        setCurrentUser(data.user);
+      } else {
+        setIsAuthenticated(false);
+        setCurrentUser(null);
+      }
     } catch {
       setIsAuthenticated(false);
+      setCurrentUser(null);
     }
   }, []);
 
@@ -95,6 +105,7 @@ export default function Dashboard() {
   const handleLogout = async () => {
     await fetch('/api/auth', { method: 'DELETE' });
     setIsAuthenticated(false);
+    setCurrentUser(null);
   };
 
   // Create / Update Complaint
@@ -166,6 +177,16 @@ export default function Dashboard() {
     }
   };
 
+  // Unique list of creators / handlers for the filter
+  const uniqueUsers = useMemo(() => {
+    const set = new Set<string>();
+    complaints.forEach((c) => {
+      if (c.createdBy) set.add(c.createdBy);
+      if (c.resolvedBy) set.add(c.resolvedBy);
+    });
+    return Array.from(set).sort();
+  }, [complaints]);
+
   // Filtered complaints
   const filteredComplaints = useMemo(() => {
     return complaints.filter((c) => {
@@ -186,6 +207,11 @@ export default function Dashboard() {
         return false;
       }
 
+      // User filter
+      if (userFilter !== 'ALL' && c.createdBy !== userFilter && c.resolvedBy !== userFilter) {
+        return false;
+      }
+
       // Search Query
       if (searchQuery.trim() !== '') {
         const query = searchQuery.toLowerCase();
@@ -194,17 +220,20 @@ export default function Dashboard() {
         const matchesCategory = c.category.toLowerCase().includes(query);
         const matchesDesc = c.description.toLowerCase().includes(query);
         const matchesNotes = c.notes?.toLowerCase().includes(query);
-        if (!matchesSupplier && !matchesWarehouse && !matchesCategory && !matchesDesc && !matchesNotes) {
+        const matchesUser = (c.createdBy && c.createdBy.toLowerCase().includes(query)) ||
+                            (c.resolvedBy && c.resolvedBy.toLowerCase().includes(query));
+
+        if (!matchesSupplier && !matchesWarehouse && !matchesCategory && !matchesDesc && !matchesNotes && !matchesUser) {
           return false;
         }
       }
 
       return true;
     });
-  }, [complaints, statusFilter, categoryFilter, supplierFilter, searchQuery]);
+  }, [complaints, statusFilter, categoryFilter, supplierFilter, userFilter, searchQuery]);
 
   if (isAuthenticated === false) {
-    return <LoginModal onSuccess={() => setIsAuthenticated(true)} />;
+    return <LoginModal onSuccess={checkAuth} />;
   }
 
   if (isAuthenticated === null) {
@@ -218,12 +247,14 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-slate-50 pb-20">
       <Header
+        currentUser={currentUser}
         onNewComplaint={() => {
           setEditingComplaint(null);
           setIsFormOpen(true);
         }}
         onExportCsv={handleExportCsv}
         onLogout={handleLogout}
+        onOpenTeamModal={() => setIsTeamModalOpen(true)}
         isExporting={isExporting}
       />
 
@@ -237,15 +268,15 @@ export default function Dashboard() {
 
         {/* Search and Secondary Filter Bar */}
         <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs mb-6 space-y-3">
-          <div className="flex flex-col sm:flex-row items-center gap-3">
+          <div className="flex flex-col lg:flex-row items-center gap-3">
             {/* Live Search Input */}
-            <div className="relative w-full sm:flex-1">
+            <div className="relative w-full lg:flex-1">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by supplier, warehouse, issue, or keyword..."
+                placeholder="Search by supplier, warehouse, issue, or team member..."
                 className="w-full pl-10 pr-9 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 placeholder:text-slate-400 transition-all"
               />
               {searchQuery && (
@@ -258,12 +289,13 @@ export default function Dashboard() {
               )}
             </div>
 
-            {/* Category Dropdown Filter */}
-            <div className="w-full sm:w-auto flex items-center gap-2">
+            {/* Dropdown Filters */}
+            <div className="w-full lg:w-auto grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {/* Category */}
               <select
                 value={categoryFilter}
                 onChange={(e) => setCategoryFilter(e.target.value)}
-                className="w-full sm:w-48 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600"
+                className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600"
               >
                 <option value="ALL">All Categories</option>
                 {suggestions.categories.map((cat) => (
@@ -273,11 +305,11 @@ export default function Dashboard() {
                 ))}
               </select>
 
-              {/* Supplier Dropdown Filter */}
+              {/* Supplier */}
               <select
                 value={supplierFilter}
                 onChange={(e) => setSupplierFilter(e.target.value)}
-                className="w-full sm:w-48 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600"
+                className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600"
               >
                 <option value="ALL">All Suppliers</option>
                 {suggestions.suppliers.map((sup) => (
@@ -286,11 +318,25 @@ export default function Dashboard() {
                   </option>
                 ))}
               </select>
+
+              {/* Team Member Filter */}
+              <select
+                value={userFilter}
+                onChange={(e) => setUserFilter(e.target.value)}
+                className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600"
+              >
+                <option value="ALL">All Team Members</option>
+                {uniqueUsers.map((u) => (
+                  <option key={u} value={u}>
+                    {u}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
           {/* Active Filter Indicators */}
-          {(statusFilter !== 'ALL' || categoryFilter !== 'ALL' || supplierFilter !== 'ALL' || searchQuery) && (
+          {(statusFilter !== 'ALL' || categoryFilter !== 'ALL' || supplierFilter !== 'ALL' || userFilter !== 'ALL' || searchQuery) && (
             <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 text-xs text-slate-500">
               <span className="font-semibold flex items-center gap-1">
                 <Filter className="w-3.5 h-3.5 text-slate-400" /> Active filters:
@@ -317,6 +363,13 @@ export default function Dashboard() {
                 </span>
               )}
 
+              {userFilter !== 'ALL' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-slate-100 text-slate-800 font-medium">
+                  Member: {userFilter}
+                  <X className="w-3 h-3 cursor-pointer hover:text-rose-600" onClick={() => setUserFilter('ALL')} />
+                </span>
+              )}
+
               {searchQuery && (
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-slate-100 text-slate-800 font-medium">
                   Search: "{searchQuery}"
@@ -329,6 +382,7 @@ export default function Dashboard() {
                   setStatusFilter('ALL');
                   setCategoryFilter('ALL');
                   setSupplierFilter('ALL');
+                  setUserFilter('ALL');
                   setSearchQuery('');
                 }}
                 className="text-xs text-emerald-700 font-semibold hover:underline ml-auto"
@@ -371,7 +425,7 @@ export default function Dashboard() {
               </div>
               <h3 className="text-base font-bold text-slate-900">No complaints found</h3>
               <p className="text-xs text-slate-500">
-                {searchQuery || statusFilter !== 'ALL' || categoryFilter !== 'ALL' || supplierFilter !== 'ALL'
+                {searchQuery || statusFilter !== 'ALL' || categoryFilter !== 'ALL' || supplierFilter !== 'ALL' || userFilter !== 'ALL'
                   ? 'No complaint records match your current filter criteria.'
                   : 'No complaints logged yet. Click the button below to add the first one.'}
               </p>
@@ -440,6 +494,13 @@ export default function Dashboard() {
           setIsFormOpen(true);
         }}
         onDelete={handleDeleteComplaint}
+      />
+
+      {/* Team Members Management Modal */}
+      <UserManagementModal
+        isOpen={isTeamModalOpen}
+        onClose={() => setIsTeamModalOpen(false)}
+        currentUser={currentUser}
       />
     </div>
   );

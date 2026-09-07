@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Complaint } from '@/types/complaint';
+import { Complaint, AppUser, SafeUser } from '@/types/complaint';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'complaints.json');
@@ -20,7 +21,27 @@ interface DatabaseSchema {
   categories: string[];
   suppliers: string[];
   warehouses: string[];
+  users: AppUser[];
 }
+
+function createDefaultPasswordHash(pwd: string): { hash: string; salt: string } {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(pwd, salt, 1000, 64, 'sha512').toString('hex');
+  return { hash, salt };
+}
+
+const DEFAULT_ADMIN_HASH = createDefaultPasswordHash('admin123');
+
+const DEFAULT_USERS: AppUser[] = [
+  {
+    id: 'u-admin',
+    username: 'admin',
+    name: 'Team Admin',
+    passwordHash: DEFAULT_ADMIN_HASH.hash,
+    salt: DEFAULT_ADMIN_HASH.salt,
+    createdAt: new Date('2026-08-01T00:00:00Z').toISOString()
+  }
+];
 
 const DEFAULT_CATEGORIES = [
   'Packaging Damage',
@@ -63,6 +84,7 @@ const INITIAL_SAMPLE_COMPLAINTS: Complaint[] = [
     dateSentToSupplier: '2026-08-02',
     description: 'Yogurt delivery arrived at +11°C (required < +4°C). 4 pallets rejected at dock receiving.',
     dateResponseReceived: null,
+    createdBy: 'Team Admin',
     createdAt: new Date('2026-08-02T10:00:00Z').toISOString(),
     updatedAt: new Date('2026-08-02T10:00:00Z').toISOString()
   },
@@ -76,6 +98,8 @@ const INITIAL_SAMPLE_COMPLAINTS: Complaint[] = [
     description: 'Crushed cartons on lower tier of pallet #491. 12 cases of pasta torn open with contents spilled.',
     dateResponseReceived: '2026-08-14',
     notes: 'Supplier issued full credit note #CR-88421.',
+    createdBy: 'Team Admin',
+    resolvedBy: 'Team Admin',
     createdAt: new Date('2026-08-11T09:30:00Z').toISOString(),
     updatedAt: new Date('2026-08-14T15:00:00Z').toISOString()
   },
@@ -88,6 +112,7 @@ const INITIAL_SAMPLE_COMPLAINTS: Complaint[] = [
     dateSentToSupplier: '2026-08-17',
     description: 'Received Hummus batches with only 4 days shelf life remaining (minimum contract agreement is 21 days).',
     dateResponseReceived: null,
+    createdBy: 'Team Admin',
     createdAt: new Date('2026-08-17T08:15:00Z').toISOString(),
     updatedAt: new Date('2026-08-17T08:15:00Z').toISOString()
   },
@@ -100,6 +125,7 @@ const INITIAL_SAMPLE_COMPLAINTS: Complaint[] = [
     dateSentToSupplier: '2026-07-21',
     description: 'Plastic fragments discovered inside 1kg Sugar bulk packaging. Sample retained for supplier QA inspection.',
     dateResponseReceived: null,
+    createdBy: 'Team Admin',
     createdAt: new Date('2026-07-21T11:00:00Z').toISOString(),
     updatedAt: new Date('2026-07-21T11:00:00Z').toISOString()
   }
@@ -118,7 +144,8 @@ function readDb(): DatabaseSchema {
       complaints: INITIAL_SAMPLE_COMPLAINTS,
       categories: DEFAULT_CATEGORIES,
       suppliers: DEFAULT_SUPPLIERS,
-      warehouses: DEFAULT_WAREHOUSES
+      warehouses: DEFAULT_WAREHOUSES,
+      users: DEFAULT_USERS
     };
     fs.writeFileSync(DB_FILE, JSON.stringify(initialData, null, 2), 'utf-8');
     return initialData;
@@ -131,13 +158,15 @@ function readDb(): DatabaseSchema {
     if (!data.categories) data.categories = DEFAULT_CATEGORIES;
     if (!data.suppliers) data.suppliers = DEFAULT_SUPPLIERS;
     if (!data.warehouses) data.warehouses = DEFAULT_WAREHOUSES;
+    if (!data.users || data.users.length === 0) data.users = DEFAULT_USERS;
     return data;
   } catch {
     const initialData: DatabaseSchema = {
       complaints: INITIAL_SAMPLE_COMPLAINTS,
       categories: DEFAULT_CATEGORIES,
       suppliers: DEFAULT_SUPPLIERS,
-      warehouses: DEFAULT_WAREHOUSES
+      warehouses: DEFAULT_WAREHOUSES,
+      users: DEFAULT_USERS
     };
     fs.writeFileSync(DB_FILE, JSON.stringify(initialData, null, 2), 'utf-8');
     return initialData;
@@ -163,8 +192,22 @@ function mapSupabaseRowToComplaint(row: any): Complaint {
     description: row.description,
     dateResponseReceived: row.date_response_received || null,
     notes: row.notes || undefined,
+    createdBy: row.created_by || undefined,
+    resolvedBy: row.resolved_by || undefined,
+    updatedBy: row.updated_by || undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+function mapSupabaseRowToUser(row: any): AppUser {
+  return {
+    id: row.id,
+    username: row.username,
+    name: row.name,
+    passwordHash: row.password_hash,
+    salt: row.salt,
+    createdAt: row.created_at
   };
 }
 
@@ -172,6 +215,139 @@ export const db = {
   isUsingSupabase(): boolean {
     return supabase !== null;
   },
+
+  /* ------------------- USER MANAGEMENT ------------------- */
+
+  async getUsers(): Promise<SafeUser[]> {
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('app_users')
+          .select('id, username, name, created_at')
+          .order('created_at', { ascending: true });
+
+        if (!error && data && data.length > 0) {
+          return data.map((u: any) => ({
+            id: u.id,
+            username: u.username,
+            name: u.name,
+            createdAt: u.created_at
+          }));
+        }
+      } catch (err) {
+        console.warn('Supabase app_users table might not exist yet, falling back to local users:', err);
+      }
+    }
+
+    const localData = readDb();
+    return localData.users.map((u) => ({
+      id: u.id,
+      username: u.username,
+      name: u.name,
+      createdAt: u.createdAt
+    }));
+  },
+
+  async getUserByUsername(username: string): Promise<AppUser | null> {
+    const cleanUsername = username.trim().toLowerCase();
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('app_users')
+          .select('*')
+          .ilike('username', cleanUsername)
+          .single();
+
+        if (!error && data) {
+          return mapSupabaseRowToUser(data);
+        }
+      } catch (err) {
+        console.warn('Supabase app_users fetch failed, checking local:', err);
+      }
+    }
+
+    const localData = readDb();
+    const found = localData.users.find((u) => u.username.toLowerCase() === cleanUsername);
+    return found || null;
+  },
+
+  async createUser(user: { username: string; name: string; passwordHash: string; salt: string }): Promise<SafeUser> {
+    const id = 'u-' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5);
+    const now = new Date().toISOString();
+
+    if (supabase) {
+      try {
+        const row = {
+          id,
+          username: user.username.trim().toLowerCase(),
+          name: user.name.trim(),
+          password_hash: user.passwordHash,
+          salt: user.salt,
+          created_at: now
+        };
+
+        const { data, error } = await supabase
+          .from('app_users')
+          .insert(row)
+          .select('id, username, name, created_at')
+          .single();
+
+        if (!error && data) {
+          return {
+            id: data.id,
+            username: data.username,
+            name: data.name,
+            createdAt: data.created_at
+          };
+        }
+      } catch (err) {
+        console.warn('Supabase createUser failed, saving locally:', err);
+      }
+    }
+
+    const localData = readDb();
+    const newUser: AppUser = {
+      id,
+      username: user.username.trim().toLowerCase(),
+      name: user.name.trim(),
+      passwordHash: user.passwordHash,
+      salt: user.salt,
+      createdAt: now
+    };
+
+    localData.users.push(newUser);
+    writeDb(localData);
+
+    return {
+      id: newUser.id,
+      username: newUser.username,
+      name: newUser.name,
+      createdAt: newUser.createdAt
+    };
+  },
+
+  async deleteUser(id: string): Promise<boolean> {
+    if (supabase) {
+      try {
+        const { error } = await supabase.from('app_users').delete().eq('id', id);
+        if (!error) return true;
+      } catch (err) {
+        console.warn('Supabase deleteUser error:', err);
+      }
+    }
+
+    const localData = readDb();
+    const initialLen = localData.users.length;
+    localData.users = localData.users.filter((u) => u.id !== id);
+    if (localData.users.length !== initialLen) {
+      writeDb(localData);
+      return true;
+    }
+    return false;
+  },
+
+  /* ------------------- COMPLAINTS CRUD ------------------- */
 
   async getComplaints(): Promise<Complaint[]> {
     if (supabase) {
@@ -223,6 +399,9 @@ export const db = {
         description: complaint.description.trim(),
         date_response_received: complaint.dateResponseReceived?.trim() || null,
         notes: complaint.notes?.trim() || null,
+        created_by: complaint.createdBy || null,
+        resolved_by: complaint.resolvedBy || null,
+        updated_by: complaint.updatedBy || null,
         created_at: now,
         updated_at: now
       };
@@ -235,7 +414,6 @@ export const db = {
 
       if (error) throw error;
 
-      // Auto-insert categories, suppliers, warehouses
       await Promise.allSettled([
         supabase.from('categories').upsert({ name: complaint.category.trim() }),
         supabase.from('suppliers').upsert({ name: complaint.supplierName.trim() }),
@@ -284,6 +462,8 @@ export const db = {
         dbUpdates.date_response_received = updates.dateResponseReceived?.trim() || null;
       }
       if (updates.notes !== undefined) dbUpdates.notes = updates.notes?.trim() || null;
+      if (updates.resolvedBy !== undefined) dbUpdates.resolved_by = updates.resolvedBy || null;
+      if (updates.updatedBy !== undefined) dbUpdates.updated_by = updates.updatedBy || null;
 
       const { data, error } = await supabase
         .from('complaints')

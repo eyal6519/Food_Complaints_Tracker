@@ -13,7 +13,9 @@ import {
   Hourglass, 
   Edit3, 
   Trash2,
-  FileText
+  FileText,
+  User,
+  UserCheck
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
@@ -100,30 +102,40 @@ export const ComplaintDetailModal: React.FC<ComplaintDetailModalProps> = ({
             </div>
           </div>
 
-          {/* Timeline */}
+          {/* Timeline with User Activity */}
           <div className="space-y-3">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Process Timeline</h3>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Process & Activity Timeline</h3>
             <div className="relative pl-6 border-l-2 border-slate-200 space-y-4">
               <div className="relative">
-                <div className="absolute -left-[31px] top-0.5 w-4 h-4 rounded-full bg-emerald-500 border-2 border-white shadow-xs" />
+                <div className="absolute -left-[31px] top-0.5 w-4 h-4 rounded-full bg-slate-400 border-2 border-white shadow-xs" />
                 <div className="text-xs text-slate-500">Complaint Received from Warehouse</div>
                 <div className="text-sm font-semibold text-slate-800">{formatDateSafe(complaint.dateSentToUs)}</div>
               </div>
 
               <div className="relative">
-                <div className="absolute -left-[31px] top-0.5 w-4 h-4 rounded-full bg-emerald-600 border-2 border-white shadow-xs" />
+                <div className="absolute -left-[31px] top-0.5 w-4 h-4 rounded-full bg-emerald-500 border-2 border-white shadow-xs" />
                 <div className="text-xs text-slate-500">Letter Sent to Supplier</div>
-                <div className="text-sm font-semibold text-slate-800">{formatDateSafe(complaint.dateSentToSupplier)}</div>
+                <div className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                  <span>{formatDateSafe(complaint.dateSentToSupplier)}</span>
+                  <span className="text-xs text-slate-400 font-normal">
+                    (Logged by <strong>{complaint.createdBy || 'Team Member'}</strong>)
+                  </span>
+                </div>
               </div>
 
               <div className="relative">
                 <div className={`absolute -left-[31px] top-0.5 w-4 h-4 rounded-full border-2 border-white shadow-xs ${
                   complaint.dateResponseReceived ? 'bg-emerald-600' : 'bg-slate-300'
                 }`} />
-                <div className="text-xs text-slate-500">Supplier Response</div>
+                <div className="text-xs text-slate-500">Supplier Response & Resolution</div>
                 {complaint.dateResponseReceived ? (
-                  <div className="text-sm font-semibold text-emerald-700">
-                    Received on {formatDateSafe(complaint.dateResponseReceived)}
+                  <div className="text-sm font-semibold text-emerald-700 space-y-0.5">
+                    <div>Received on {formatDateSafe(complaint.dateResponseReceived)}</div>
+                    {complaint.resolvedBy && (
+                      <div className="text-xs font-normal text-emerald-800">
+                        Resolved & recorded by <strong>{complaint.resolvedBy}</strong>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="text-sm text-slate-400 italic">Awaiting response ({daysPending} days elapsed)</div>
@@ -151,6 +163,19 @@ export const ComplaintDetailModal: React.FC<ComplaintDetailModalProps> = ({
               </div>
             </div>
           )}
+
+          {/* Audit trail footer summary */}
+          <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex flex-wrap items-center justify-between text-xs text-slate-400 gap-2">
+            <div className="flex items-center gap-1.5">
+              <User className="w-3.5 h-3.5 text-slate-400" />
+              <span>Created by <strong className="text-slate-600">{complaint.createdBy || 'Team Member'}</strong></span>
+            </div>
+            {complaint.updatedBy && (
+              <div>
+                Last updated by <strong className="text-slate-600">{complaint.updatedBy}</strong>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Footer Actions */}

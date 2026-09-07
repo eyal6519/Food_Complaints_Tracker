@@ -10,9 +10,23 @@ export interface Complaint {
   description: string;
   dateResponseReceived: string | null; // YYYY-MM-DD or null
   notes?: string;
+  createdBy?: string; // Name of user who logged it
+  resolvedBy?: string; // Name of user who resolved it
+  updatedBy?: string; // Name of user who last edited it
   createdAt: string;
   updatedAt: string;
 }
+
+export interface AppUser {
+  id: string;
+  username: string;
+  name: string;
+  passwordHash: string;
+  salt: string;
+  createdAt: string;
+}
+
+export type SafeUser = Omit<AppUser, 'passwordHash' | 'salt'>;
 
 export function getComputedStatus(
   complaint: Pick<Complaint, 'dateResponseReceived' | 'dateSentToSupplier'>,
@@ -24,7 +38,6 @@ export function getComputedStatus(
   if (complaint.dateSentToSupplier && complaint.dateSentToSupplier.trim() !== '') {
     const sentDate = new Date(complaint.dateSentToSupplier);
     const today = new Date();
-    // Normalize times to midnight for clean day calculation
     sentDate.setHours(0, 0, 0, 0);
     today.setHours(0, 0, 0, 0);
     const diffTime = today.getTime() - sentDate.getTime();

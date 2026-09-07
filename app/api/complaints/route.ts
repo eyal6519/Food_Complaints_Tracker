@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { getCurrentUser } from '@/lib/auth';
 
 export async function GET() {
   try {
@@ -15,6 +16,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const currentUser = getCurrentUser();
     const body = await request.json();
     const {
       category,
@@ -34,6 +36,9 @@ export async function POST(request: Request) {
       );
     }
 
+    const creatorName = currentUser?.name || 'Team Member';
+    const isResolved = Boolean(dateResponseReceived && dateResponseReceived.trim() !== '');
+
     const created = await db.createComplaint({
       category: category.trim(),
       supplierName: supplierName.trim(),
@@ -42,7 +47,9 @@ export async function POST(request: Request) {
       dateSentToSupplier: dateSentToSupplier.trim(),
       description: description.trim(),
       dateResponseReceived: dateResponseReceived ? dateResponseReceived.trim() : null,
-      notes: notes ? notes.trim() : undefined
+      notes: notes ? notes.trim() : undefined,
+      createdBy: creatorName,
+      resolvedBy: isResolved ? creatorName : undefined
     });
 
     return NextResponse.json({ success: true, data: created }, { status: 201 });
