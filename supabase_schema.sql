@@ -65,10 +65,19 @@ ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE suppliers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE warehouses ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Allow full access to app_users" ON app_users;
 CREATE POLICY "Allow full access to app_users" ON app_users FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow full access to complaints" ON complaints;
 CREATE POLICY "Allow full access to complaints" ON complaints FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow full access to categories" ON categories;
 CREATE POLICY "Allow full access to categories" ON categories FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow full access to suppliers" ON suppliers;
 CREATE POLICY "Allow full access to suppliers" ON suppliers FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow full access to warehouses" ON warehouses;
 CREATE POLICY "Allow full access to warehouses" ON warehouses FOR ALL USING (true) WITH CHECK (true);
 
 -- 5. Insert Initial Seed Data for Autocomplete Suggestions
